@@ -1,0 +1,7 @@
+{
+    "command": "{{ .Command | json_escape }}",
+    "invokedAt": {{ .InvokedAt }},
+    "environments": {
+        "SHELL": "{{ must_env `SHELL` }}"
+    }
+}
