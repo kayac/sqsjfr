@@ -77,6 +77,7 @@ func New(ctx context.Context, opt *Option) (*App, error) {
 
 // Run runs sqsjfr instance.
 func (app *App) Run() {
+	log.Println("[info] running daemon")
 	app.cron.Start()
 	<-app.ctx.Done()
 	app.cron.Stop()
@@ -113,14 +114,14 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, error) {
 		}
 		f := reSpace.Split(line, 6)
 		if len(f) < 6 {
-			return nil, fmt.Errorf("line:%d too few feilds > %s", lines, line)
+			return nil, fmt.Errorf("line %d, too few feilds > %s", lines, line)
 		}
 		spec := strings.Join(f[0:5], " ")
 		command := f[5]
 		job := fn(command)
 		id, err := c.AddJob(spec, job)
 		if err != nil {
-			return nil, errors.Wrapf(err, "line:%d failed to add > %s", lines, line)
+			return nil, errors.Wrapf(err, "line %d, failed to add > %s", lines, line)
 		}
 		if j, ok := job.(*Job); ok {
 			j.ID = id
@@ -131,6 +132,7 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, error) {
 }
 
 func (app *App) load(fn func(string) cron.Job) error {
+	log.Println("[info] loading crontab", app.option.Path)
 	f, err := os.Open(app.option.Path)
 	if err != nil {
 		return err
@@ -140,6 +142,8 @@ func (app *App) load(fn func(string) cron.Job) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to read crontab %s", app.option.Path)
 	}
+
+	log.Printf("[info] %d entries registered", len(app.cron.Entries()))
 	return nil
 }
 
