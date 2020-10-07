@@ -8,8 +8,6 @@ sqsjfr is designed to cooperate with [sqsjkr](https://github.com/kayac/sqsjkr), 
 
 ## Installation
 
-## Install
-
 ### binary packages
 
 [Releases](https://github.com/kayac/sqsjfr/releases).
@@ -40,7 +38,18 @@ Environment variables `SQSJFR_*` are also specify that options. For example, `SQ
 $ sqsjfr \
     -queue-url https://sqs.ap-northeast-1.amazonaws.com/123456789012/cron.fifo \
     -message-template message.json \
-    my-crontab-file
+    example.crontab
+2020/10/08 00:43:37.826554 [info] starting up
+2020/10/08 00:43:37.828773 [info] loading crontab example.crontab
+2020/10/08 00:43:37.828953 [info] [entry:1] registered > * * * * * echo "hello world! $(date)"; sleep 10; echo "goodby world! $(date)"
+2020/10/08 00:43:37.828980 [info] [entry:2] registered > * * * * * LANG=C date; sleep 5; LANG=C date
+2020/10/08 00:43:37.828994 [info] 2 entries registered
+2020/10/08 00:43:37.828999 [info] running daemon
+2020/10/08 00:44:03.313092 [info] [entry:2] invoke job {"command":"LANG=C date; sleep 5; LANG=C date","invokedAt":"1602085440"}
+2020/10/08 00:44:04.429434 [info] [entry:1] invoke job {"command":"echo \"hello world! $(date)\"; sleep 10; echo \"goodby world! $(date)\"","invokedAt":"1602085440"}
+^C2020/10/08 00:44:09.935606 [info] got signal interrupt
+2020/10/08 00:44:09.935625 [info] shutting down
+2020/10/08 00:44:09.935628 [info] goodby
 ```
 
 - `-queue-url`: required. must be a FIFO queue.
