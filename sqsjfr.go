@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"regexp"
 	"strconv"
@@ -26,8 +27,14 @@ import (
 var reSpace = regexp.MustCompile("[ \t\n\v\f\r\u0085\u00A0]+")
 var reTrimPrefix = regexp.MustCompile("^[ \t\n\v\f\r\u0085\u00A0]+")
 
+const randomDelaySecond = 5
+
 // SQSTimeout defines a timeout to send message.
 var SQSTimeout = 10 * time.Second
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 type message struct {
 	Body      map[string]interface{}
@@ -69,7 +76,7 @@ func New(ctx context.Context, opt *Option) (*App, error) {
 		sqs:    sqs.New(sess),
 		ctx:    ctx,
 	}
-	if err := app.load(app.newJob); err != nil {
+	if err := app.load(); err != nil {
 		return nil, err
 	}
 	return app, nil
@@ -86,12 +93,12 @@ func (app *App) Run() {
 	log.Println("[info] goodby")
 }
 
-func newMessage(command, messageTemplate string) (*message, error) {
-	now := time.Now().Truncate(time.Minute)
+func newMessage(command, messageTemplate string, now time.Time) (*message, error) {
+	min := now.Truncate(time.Minute)
 	msg := message{
 		Body:      make(map[string]interface{}),
 		Command:   command,
-		InvokedAt: now.Unix(),
+		InvokedAt: min.Unix(),
 	}
 	loader := config.New()
 	loader.Data = msg
@@ -131,7 +138,7 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, error) {
 	return c, nil
 }
 
-func (app *App) load(fn func(string) cron.Job) error {
+func (app *App) load() error {
 	log.Println("[info] loading crontab", app.option.Path)
 	f, err := os.Open(app.option.Path)
 	if err != nil {
@@ -151,8 +158,8 @@ func (app *App) send(msg *message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), SQSTimeout)
 	defer cancel()
 	in := &sqs.SendMessageInput{
-		MessageBody:            aws.String(msg.String()),
 		QueueUrl:               aws.String(app.option.QueueURL),
+		MessageBody:            aws.String(msg.String()),
 		MessageDeduplicationId: aws.String(msg.DeduplicationID()),
 		MessageGroupId:         aws.String("sqsjfr"),
 	}
@@ -166,9 +173,12 @@ func (app *App) send(msg *message) error {
 }
 
 func (app *App) newJob(command string) cron.Job {
+	delay := time.Second + time.Duration(rand.Int63n(randomDelaySecond*1000))*time.Millisecond
+	log.Printf("[debug] new job command:%s delay:%s", command, delay)
 	return &Job{
 		Command: command,
 		app:     app,
+		delay:   delay,
 	}
 }
 
@@ -177,17 +187,20 @@ type Job struct {
 	ID      cron.EntryID
 	Command string
 	app     *App
+	delay   time.Duration
 }
 
 // Run runs a Job.
 func (j *Job) Run() {
 	j.app.wg.Add(1)
 	defer j.app.wg.Done()
-	msg, err := newMessage(j.Command, j.app.option.MessageTemplate)
+
+	msg, err := newMessage(j.Command, j.app.option.MessageTemplate, time.Now())
 	if err != nil {
 		log.Printf("[warn] [entry:%d] %s", j.ID, err)
 		return
 	}
+	time.Sleep(j.delay)
 	log.Printf("[info] [entry:%d] invoke job %s", j.ID, msg.String())
 	if err := j.app.send(msg); err != nil {
 		log.Printf("[error] [entry:%d] failed to send message: %s", j.ID, err)

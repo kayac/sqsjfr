@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -34,7 +35,7 @@ func (opt *Option) Validate() error {
 		return errors.New("FIFO queue is required")
 	}
 
-	msg, err := newMessage(`echo "hello world!"`, opt.MessageTemplate)
+	msg, err := newMessage(`echo "hello world!"`, opt.MessageTemplate, time.Now())
 	if err != nil {
 		return err
 	}

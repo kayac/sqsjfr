@@ -20,7 +20,9 @@ func TestNewMessage(t *testing.T) {
 	defer os.Setenv("SHELL", shell)
 
 	os.Setenv("SHELL", "/bin/zsh")
-	msg, err := sqsjfr.NewMessage(`echo "hello world"`, "tests/message.json")
+	now := time.Date(2020, 10, 7, 11, 22, 33, 123456, time.Local)
+	nowMin := now.Truncate(time.Minute)
+	msg, err := sqsjfr.NewMessage(`echo "hello world"`, "tests/message.json", now)
 	if err != nil {
 		t.Error(err)
 	}
@@ -32,7 +34,8 @@ func TestNewMessage(t *testing.T) {
 	dupID := msg.DeduplicationID()
 	if res.Command != `echo "hello world"` ||
 		res.InvokedAt%60 != 0 ||
-		res.InvokedAt > time.Now().Unix() ||
+		res.InvokedAt < nowMin.Unix() ||
+		res.InvokedAt > now.Unix() ||
 		len(res.Environments) != 1 ||
 		res.Environments["SHELL"] != "/bin/zsh" {
 		t.Errorf("unexpected encoded message JSON: %s", msg.String())

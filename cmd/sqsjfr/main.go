@@ -21,6 +21,10 @@ var trapSignals = []os.Signal{
 }
 var sigCh = make(chan os.Signal, 1)
 
+func init() {
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+}
+
 func main() {
 	err := _main()
 	if err != nil {
