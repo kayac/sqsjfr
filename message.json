@@ -1,0 +1,4 @@
+{
+    "command": "{{ .Command | json_escape }}",
+    "invokedAt": "{{ .InvokedAt }}"
+}
