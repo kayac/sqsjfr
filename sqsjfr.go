@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"regexp"
@@ -32,6 +33,7 @@ type message struct {
 	Body      map[string]interface{}
 	Command   string
 	InvokedAt int64
+	EntryID   int
 }
 
 func (m message) String() string {
@@ -64,11 +66,10 @@ func New(ctx context.Context, opt *Option) (*App, error) {
 	}
 	app := &App{
 		option: opt,
-		cron:   cron.New(),
 		sqs:    sqs.New(sess),
 		ctx:    ctx,
 	}
-	if err := app.load(); err != nil {
+	if err := app.load(app.newJob); err != nil {
 		return nil, err
 	}
 	return app, nil
@@ -79,8 +80,9 @@ func (app *App) Run() {
 	app.cron.Start()
 	<-app.ctx.Done()
 	app.cron.Stop()
-	log.Println("[info] waiting shutdown")
+	log.Println("[info] shutting down")
 	app.wg.Wait() // wait all invoke functions
+	log.Println("[info] goodby")
 }
 
 func newMessage(command, messageTemplate string) (*message, error) {
@@ -98,29 +100,9 @@ func newMessage(command, messageTemplate string) (*message, error) {
 	return &msg, nil
 }
 
-func (app *App) createInvokeFunc(command string) func() {
-	return func() {
-		app.wg.Add(1)
-		defer app.wg.Done()
-		msg, err := newMessage(command, app.option.MessageTemplate)
-		if err != nil {
-			log.Println("[warn]", err)
-			return
-		}
-		log.Println("[invoke]", msg.String())
-		if err := app.send(msg); err != nil {
-			log.Println("[error] failed to send message", err)
-		}
-	}
-}
-
-func (app *App) load() error {
-	f, err := os.Open(app.option.Path)
-	if err != nil {
-		return err
-	}
-
-	scanner := bufio.NewScanner(f)
+func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, error) {
+	c := cron.New()
+	scanner := bufio.NewScanner(r)
 	lines := 0
 	for scanner.Scan() {
 		lines++
@@ -131,15 +113,32 @@ func (app *App) load() error {
 		}
 		f := reSpace.Split(line, 6)
 		if len(f) < 6 {
-			return fmt.Errorf("line:%d too few feilds", lines)
+			return nil, fmt.Errorf("line:%d too few feilds > %s", lines, line)
 		}
 		spec := strings.Join(f[0:5], " ")
 		command := f[5]
-		id, err := app.cron.AddFunc(spec, app.createInvokeFunc(command))
+		job := fn(command)
+		id, err := c.AddJob(spec, job)
 		if err != nil {
-			return errors.Wrapf(err, "line:%d failed to add: %s", lines, line)
+			return nil, errors.Wrapf(err, "line:%d failed to add > %s", lines, line)
 		}
-		log.Println("[info] registered id", id, "spec:", spec, "command:", command)
+		if j, ok := job.(*Job); ok {
+			j.ID = id
+		}
+		log.Printf("[info] [entry:%d] registered > %s", id, line)
+	}
+	return c, nil
+}
+
+func (app *App) load(fn func(string) cron.Job) error {
+	f, err := os.Open(app.option.Path)
+	if err != nil {
+		return err
+	}
+
+	app.cron, err = readCrontab(f, app.newJob)
+	if err != nil {
+		return errors.Wrapf(err, "failed to read crontab %s", app.option.Path)
 	}
 	return nil
 }
@@ -153,11 +152,40 @@ func (app *App) send(msg *message) error {
 		MessageDeduplicationId: aws.String(msg.DeduplicationID()),
 		MessageGroupId:         aws.String("sqsjfr"),
 	}
-	log.Printf("[debug] sending message %s", in.String())
+	log.Println("[debug] sending message:", in.String())
 	out, err := app.sqs.SendMessageWithContext(ctx, in)
 	if err != nil {
 		return err
 	}
-	log.Printf("[debug] sent messageID:%s", *out.MessageId)
+	log.Println("[debug] sent messageID:", *out.MessageId)
 	return nil
+}
+
+func (app *App) newJob(command string) cron.Job {
+	return &Job{
+		Command: command,
+		app:     app,
+	}
+}
+
+// Job represents a cron job.
+type Job struct {
+	ID      cron.EntryID
+	Command string
+	app     *App
+}
+
+// Run runs a Job.
+func (j *Job) Run() {
+	j.app.wg.Add(1)
+	defer j.app.wg.Done()
+	msg, err := newMessage(j.Command, j.app.option.MessageTemplate)
+	if err != nil {
+		log.Printf("[warn] [entry:%d] %s", j.ID, err)
+		return
+	}
+	log.Printf("[info] [entry:%d] invoke job %s", j.ID, msg.String())
+	if err := j.app.send(msg); err != nil {
+		log.Printf("[error] [entry:%d] failed to send message: %s", j.ID, err)
+	}
 }

@@ -1,5 +1,6 @@
 package sqsjfr
 
 var (
-	NewMessage = newMessage
+	NewMessage  = newMessage
+	ReadCrontab = readCrontab
 )

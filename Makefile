@@ -4,7 +4,7 @@ sqsjfr: *.go go.* cmd/sqsjfr/*.go
 	cd cmd/sqsjfr && go build -o ../../sqsjfr .
 
 test:
-	go test ./...
+	go test -v ./...
 
 clean:
 	rm -rf sqsjfr dist/

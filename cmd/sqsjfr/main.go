@@ -10,8 +10,16 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/hashicorp/logutils"
 	"github.com/kayac/sqsjfr"
 )
+
+var trapSignals = []os.Signal{
+	syscall.SIGHUP,
+	syscall.SIGINT,
+	syscall.SIGTERM,
+}
+var sigCh = make(chan os.Signal, 1)
 
 func main() {
 	err := _main()
@@ -23,14 +31,24 @@ func main() {
 
 func _main() error {
 	var opt sqsjfr.Option
+	var logLevel string
 
 	flag.StringVar(&opt.QueueURL, "queue-url", "", "SQS queue URL")
 	flag.StringVar(&opt.MessageTemplate, "message-template", "", "SQS message template(JSON)")
+	flag.StringVar(&logLevel, "log-level", "info", "log level")
 	flag.VisitAll(envToFlag)
 	flag.Parse()
+
+	filter := &logutils.LevelFilter{
+		Levels:   []logutils.LogLevel{"debug", "info", "warn", "error"},
+		MinLevel: logutils.LogLevel(logLevel),
+		Writer:   os.Stderr,
+	}
+	log.SetOutput(filter)
+
 	args := flag.Args()
 	if len(args) != 1 {
-		return errors.New("crotab file path is required")
+		return errors.New("crontab is required")
 	}
 	opt.Path = args[0]
 	log.Printf("[debug] option:%#v", opt)
@@ -39,15 +57,10 @@ func _main() error {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sigs := []os.Signal{
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-	}
-	ch := make(chan os.Signal, 10)
-	signal.Notify(ch, sigs...)
+	defer cancel()
+	signal.Notify(sigCh, trapSignals...)
 	go func() {
-		sig := <-ch
+		sig := <-sigCh
 		log.Println("[info] got signal", sig)
 		cancel()
 	}()
