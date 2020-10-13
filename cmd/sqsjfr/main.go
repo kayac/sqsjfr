@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	_ "time/tzdata"
 
 	"github.com/hashicorp/logutils"
 	"github.com/kayac/sqsjfr"
