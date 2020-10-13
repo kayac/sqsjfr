@@ -3,6 +3,7 @@ package sqsjfr_test
 import (
 	"log"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/kayac/sqsjfr"
@@ -29,7 +30,7 @@ func TestReadCrontab(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	c, err := sqsjfr.ReadCrontab(f, newJob)
+	c, envs, err := sqsjfr.ReadCrontab(f, newJob)
 	if err != nil {
 		t.Error(err)
 	}
@@ -48,6 +49,13 @@ func TestReadCrontab(t *testing.T) {
 	if testResults[1] != `result of date` {
 		t.Error("unexpected test result[1]", testResults[1])
 	}
+
+	if envs["FOO"] != `foo " foo` {
+		t.Error("unexpected FOO", envs["FOO"])
+	}
+	if envs["BAR"] != `bar` {
+		t.Error("unexpected BAR", envs["BAR"])
+	}
 }
 
 func TestReadCrontabFail(t *testing.T) {
@@ -55,12 +63,33 @@ func TestReadCrontabFail(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	c, err := sqsjfr.ReadCrontab(f, newJob)
+	c, _, err := sqsjfr.ReadCrontab(f, newJob)
 	t.Log(err)
 	if err == nil {
 		t.Error("must be failed")
 	}
 	if c != nil {
+		t.Error("must be nil when failed")
+	}
+}
+
+func TestReadCrontabFailEnv(t *testing.T) {
+	f, err := os.Open("tests/crontab.badenv")
+	if err != nil {
+		t.Error(err)
+	}
+	c, envs, err := sqsjfr.ReadCrontab(f, newJob)
+	t.Log(err)
+	if err == nil {
+		t.Error("must be failed")
+	}
+	if !strings.HasPrefix(err.Error(), "error on line 8:") {
+		t.Error("unexpected error message", err)
+	}
+	if c != nil {
+		t.Error("must be nil when failed")
+	}
+	if envs != nil {
 		t.Error("must be nil when failed")
 	}
 }

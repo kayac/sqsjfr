@@ -1,2 +1,5 @@
+# comment
+RUNNER=/usr/local/bin/job-runner
+
 * * * * * echo "hello world! $(date)"; sleep 10; echo "goodby world! $(date)"
-* * * * * LANG=C date; sleep 5; LANG=C date
+* * * * * $RUNNER -- date

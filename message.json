@@ -1,4 +1,8 @@
 {
     "command": "{{ .Command | json_escape }}",
-    "invokedAt": "{{ .InvokedAt }}"
+    "invokedAt": "{{ .InvokedAt }}",
+    "envs": {
+        "HOME": "{{ must_env `HOME` }}",
+        "RUNNER": "{{ .Env.RUNNER }}"
+    }
 }
