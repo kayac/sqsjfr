@@ -35,7 +35,12 @@ func (opt *Option) Validate() error {
 		return errors.New("FIFO queue is required")
 	}
 
-	msg, err := newMessage(`echo "hello world!"`, opt.MessageTemplate, time.Now())
+	msg, err := newMessage(
+		`echo "hello world!"`,
+		opt.MessageTemplate,
+		time.Now(),
+		map[string]string{},
+	)
 	if err != nil {
 		return err
 	}

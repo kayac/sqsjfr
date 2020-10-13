@@ -2,6 +2,7 @@ package sqsjfr
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -19,13 +20,17 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/hashicorp/go-envparse"
 	"github.com/kayac/go-config"
 	"github.com/pkg/errors"
 	"github.com/robfig/cron/v3"
 )
 
-var reSpace = regexp.MustCompile("[ \t\n\v\f\r\u0085\u00A0]+")
-var reTrimPrefix = regexp.MustCompile("^[ \t\n\v\f\r\u0085\u00A0]+")
+var (
+	reSpace        = regexp.MustCompile("[ \t\n\v\f\r\u0085\u00A0]+")
+	reTrimPrefix   = regexp.MustCompile("^[ \t\n\v\f\r\u0085\u00A0]+")
+	reLooksLikeEnv = regexp.MustCompile("^[A-Za-z_][A-Za-z0-9_]*=")
+)
 
 const randomDelaySecond = 5
 
@@ -41,6 +46,7 @@ type message struct {
 	Command   string
 	InvokedAt int64
 	EntryID   int
+	Env       map[string]string
 }
 
 func (m message) String() string {
@@ -60,6 +66,7 @@ func (m message) DeduplicationID() string {
 type App struct {
 	option *Option
 	cron   *cron.Cron
+	envs   map[string]string
 	sqs    *sqs.SQS
 	ctx    context.Context
 	wg     sync.WaitGroup
@@ -93,49 +100,65 @@ func (app *App) Run() {
 	log.Println("[info] goodby")
 }
 
-func newMessage(command, messageTemplate string, now time.Time) (*message, error) {
+func newMessage(command, messageTemplate string, now time.Time, envs map[string]string) (*message, error) {
 	min := now.Truncate(time.Minute)
 	msg := message{
 		Body:      make(map[string]interface{}),
 		Command:   command,
 		InvokedAt: min.Unix(),
+		Env:       envs,
 	}
 	loader := config.New()
 	loader.Data = msg
 	if err := loader.LoadWithEnvJSON(&msg.Body, messageTemplate); err != nil {
-		return nil, fmt.Errorf("failed to create message with template: %s", messageTemplate)
+		return nil, fmt.Errorf("failed to create message with template: %s", err)
 	}
 	return &msg, nil
 }
 
-func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, error) {
+func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, map[string]string, error) {
 	c := cron.New()
 	scanner := bufio.NewScanner(r)
 	lines := 0
+	envsBuf := bytes.NewBuffer([]byte{})
 	for scanner.Scan() {
 		lines++
 		line := scanner.Text()
 		line = reTrimPrefix.ReplaceAllString(line, "")
 		if line == "" || strings.HasPrefix(line, "#") { // skip
+			envsBuf.WriteString("\n") // required for valid "error on line x"
 			continue
 		}
+		if reLooksLikeEnv.MatchString(line) {
+			envsBuf.WriteString(line + "\n")
+			continue
+		}
+		envsBuf.WriteString("\n")
 		f := reSpace.Split(line, 6)
 		if len(f) < 6 {
-			return nil, fmt.Errorf("line %d, too few feilds > %s", lines, line)
+			return nil, nil, fmt.Errorf("line %d, too few feilds > %s", lines, line)
 		}
 		spec := strings.Join(f[0:5], " ")
 		command := f[5]
 		job := fn(command)
 		id, err := c.AddJob(spec, job)
 		if err != nil {
-			return nil, errors.Wrapf(err, "line %d, failed to add > %s", lines, line)
+			return nil, nil, errors.Wrapf(err, "line %d, failed to add > %s", lines, line)
 		}
 		if j, ok := job.(*Job); ok {
 			j.ID = id
 		}
 		log.Printf("[info] [entry:%d] registered > %s", id, line)
 	}
-	return c, nil
+
+	envs, err := envparse.Parse(envsBuf)
+	if err != nil {
+		return nil, nil, err
+	}
+	for name, value := range envs {
+		log.Printf("[info] defined > %s=%s", name, value)
+	}
+	return c, envs, nil
 }
 
 func (app *App) load() error {
@@ -145,12 +168,13 @@ func (app *App) load() error {
 		return err
 	}
 
-	app.cron, err = readCrontab(f, app.newJob)
+	app.cron, app.envs, err = readCrontab(f, app.newJob)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read crontab %s", app.option.Path)
 	}
 
 	log.Printf("[info] %d entries registered", len(app.cron.Entries()))
+	log.Printf("[info] %d environment variables defined", len(app.envs))
 	return nil
 }
 
@@ -195,7 +219,7 @@ func (j *Job) Run() {
 	j.app.wg.Add(1)
 	defer j.app.wg.Done()
 
-	msg, err := newMessage(j.Command, j.app.option.MessageTemplate, time.Now())
+	msg, err := newMessage(j.Command, j.app.option.MessageTemplate, time.Now(), j.app.envs)
 	if err != nil {
 		log.Printf("[warn] [entry:%d] %s", j.ID, err)
 		return

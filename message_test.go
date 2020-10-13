@@ -22,7 +22,11 @@ func TestNewMessage(t *testing.T) {
 	os.Setenv("SHELL", "/bin/zsh")
 	now := time.Date(2020, 10, 7, 11, 22, 33, 123456, time.Local)
 	nowMin := now.Truncate(time.Minute)
-	msg, err := sqsjfr.NewMessage(`echo "hello world"`, "tests/message.json", now)
+	envs := map[string]string{
+		"FOO": `foo " foo`,
+		"BAR": "bar",
+	}
+	msg, err := sqsjfr.NewMessage(`echo "hello world"`, "tests/message.json", now, envs)
 	if err != nil {
 		t.Error(err)
 	}
@@ -36,8 +40,9 @@ func TestNewMessage(t *testing.T) {
 		res.InvokedAt%60 != 0 ||
 		res.InvokedAt < nowMin.Unix() ||
 		res.InvokedAt > now.Unix() ||
-		len(res.Environments) != 1 ||
-		res.Environments["SHELL"] != "/bin/zsh" {
+		len(res.Environments) != 2 ||
+		res.Environments["SHELL"] != "/bin/zsh" ||
+		res.Environments["FOO"] != `foo " foo` {
 		t.Errorf("unexpected encoded message JSON: %s", msg.String())
 	}
 	msg.Body["xxx"] = "yyy"

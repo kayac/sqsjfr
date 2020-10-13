@@ -1,9 +1,9 @@
 # This is a comment
   # indented comment
 FOO="foo \" foo"
-BAR=bar
 
 *  *   *   *  * echo "hello world!"
 0  0  31  12  * date
 
+BAR="xxx
 # done
