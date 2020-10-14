@@ -26,7 +26,7 @@ func TestNewMessage(t *testing.T) {
 		"FOO": `foo " foo`,
 		"BAR": "bar",
 	}
-	msg, err := sqsjfr.NewMessage(`echo "hello world"`, "tests/message.json", now, envs)
+	msg, err := sqsjfr.NewMessage(`echo "hello world"`, "tests/message.template", now, envs)
 	if err != nil {
 		t.Error(err)
 	}
@@ -41,7 +41,7 @@ func TestNewMessage(t *testing.T) {
 		res.InvokedAt < nowMin.Unix() ||
 		res.InvokedAt > now.Unix() ||
 		len(res.Environments) != 2 ||
-		res.Environments["SHELL"] != "/bin/zsh" ||
+		res.Environments["BAR"] != "bar" ||
 		res.Environments["FOO"] != `foo " foo` {
 		t.Errorf("unexpected encoded message JSON: %s", msg.String())
 	}
@@ -50,6 +50,46 @@ func TestNewMessage(t *testing.T) {
 		t.Error("duplication id must be changed when body modified")
 	}
 	delete(msg.Body, "xxx")
+	if dupID != msg.DeduplicationID() {
+		t.Error("duplication id must be equals")
+	}
+	msg.InvokedAt += 60
+	if dupID == msg.DeduplicationID() {
+		t.Error("duplication id must be changed when invokedAt modified")
+	}
+}
+
+func TestNewMessageNoTemplate(t *testing.T) {
+	now := time.Date(2020, 10, 7, 11, 22, 33, 123456, time.Local)
+	nowMin := now.Truncate(time.Minute)
+	envs := map[string]string{
+		"FOO": `foo " foo`,
+		"BAR": "bar",
+	}
+	msg, err := sqsjfr.NewMessage(`echo "hello world"`, "", now, envs)
+	if err != nil {
+		t.Error(err)
+	}
+	var res sqsjfr.DefaultMessage
+	if err := json.Unmarshal([]byte(msg.String()), &res); err != nil {
+		t.Error(err)
+	}
+	t.Log(msg.String())
+	dupID := msg.DeduplicationID()
+	if res.Command != `echo "hello world"` ||
+		res.InvokedAt%60 != 0 ||
+		res.InvokedAt < nowMin.Unix() ||
+		res.InvokedAt > now.Unix() ||
+		len(res.Env) != 2 ||
+		res.Env["BAR"] != "bar" ||
+		res.Env["FOO"] != `foo " foo` {
+		t.Errorf("unexpected encoded message JSON: %s", msg.String())
+	}
+	msg.Command += "; sleep 1"
+	if dupID == msg.DeduplicationID() {
+		t.Error("duplication id must be changed when body modified")
+	}
+	msg.Command = res.Command
 	if dupID != msg.DeduplicationID() {
 		t.Error("duplication id must be equals")
 	}

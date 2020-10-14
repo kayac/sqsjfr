@@ -64,7 +64,7 @@ Template syntax `{{ }}` will be expanded when SQS messages sent.
 
 - .Command : A command line in crontab.
 - .InvokedAt : Invocation UNIX time (truncated by a minute.).
-- .Env : Environment variables map[string]string defined in crontab.
+- .Env : Environment variables map which defined in crontab. When a whole .Env is evaluated as a string, returns JSON string.
 - must_env `FOO` : Environment variable "FOO" defined on a running sqsjfr process.
 
 ```console

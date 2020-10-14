@@ -4,15 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +18,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/hashicorp/go-envparse"
-	"github.com/kayac/go-config"
 	"github.com/pkg/errors"
 	"github.com/robfig/cron/v3"
 )
@@ -41,32 +37,11 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-type message struct {
-	Body      map[string]interface{}
-	Command   string
-	InvokedAt int64
-	EntryID   int
-	Env       map[string]string
-}
-
-func (m message) String() string {
-	var b strings.Builder
-	json.NewEncoder(&b).Encode(m.Body)
-	return strings.TrimSuffix(b.String(), "\n")
-}
-
-func (m message) DeduplicationID() string {
-	h := sha256.New()
-	h.Write([]byte(m.String()))
-	h.Write([]byte(strconv.FormatInt(m.InvokedAt, 10)))
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
 // App represents a sqsjfr application instance.
 type App struct {
 	option *Option
 	cron   *cron.Cron
-	envs   map[string]string
+	envs   environments
 	sqs    *sqs.SQS
 	ctx    context.Context
 	wg     sync.WaitGroup
@@ -100,23 +75,7 @@ func (app *App) Run() {
 	log.Println("[info] goodby")
 }
 
-func newMessage(command, messageTemplate string, now time.Time, envs map[string]string) (*message, error) {
-	min := now.Truncate(time.Minute)
-	msg := message{
-		Body:      make(map[string]interface{}),
-		Command:   command,
-		InvokedAt: min.Unix(),
-		Env:       envs,
-	}
-	loader := config.New()
-	loader.Data = msg
-	if err := loader.LoadWithEnvJSON(&msg.Body, messageTemplate); err != nil {
-		return nil, fmt.Errorf("failed to create message with template: %s", err)
-	}
-	return &msg, nil
-}
-
-func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, map[string]string, error) {
+func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, environments, error) {
 	c := cron.New()
 	scanner := bufio.NewScanner(r)
 	lines := 0
@@ -158,7 +117,7 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, map[string]
 	for name, value := range envs {
 		log.Printf("[info] defined > %s=%s", name, value)
 	}
-	return c, envs, nil
+	return c, environments(envs), nil
 }
 
 func (app *App) load() error {
