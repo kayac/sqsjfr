@@ -41,7 +41,7 @@ func init() {
 type App struct {
 	option *Option
 	cron   *cron.Cron
-	envs   environments
+	envs   Environments
 	sqs    *sqs.SQS
 	ctx    context.Context
 	wg     sync.WaitGroup
@@ -75,7 +75,7 @@ func (app *App) Run() {
 	log.Println("[info] goodby")
 }
 
-func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, environments, error) {
+func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environments, error) {
 	c := cron.New()
 	scanner := bufio.NewScanner(r)
 	lines := 0
@@ -117,7 +117,7 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, environment
 	for name, value := range envs {
 		log.Printf("[info] defined > %s=%s", name, value)
 	}
-	return c, environments(envs), nil
+	return c, Environments(envs), nil
 }
 
 func (app *App) load() error {
@@ -137,7 +137,7 @@ func (app *App) load() error {
 	return nil
 }
 
-func (app *App) send(msg *message) error {
+func (app *App) send(msg *Message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), SQSTimeout)
 	defer cancel()
 	in := &sqs.SendMessageInput{

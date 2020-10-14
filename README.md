@@ -67,6 +67,19 @@ Template syntax `{{ }}` will be expanded when SQS messages sent.
 - .Env : Environment variables map which defined in crontab. When a whole .Env is evaluated as a string, returns JSON string.
 - must_env `FOO` : Environment variable "FOO" defined on a running sqsjfr process.
 
+When -message-template is not specified, default SQS message generated as below.
+
+```json
+{
+  "command": "$RUNNER -- date",
+  "invoked_at": 1602646620,
+  "entry_id": 2,
+  "envs": {
+    "RUNNER":"/usr/local/bin/job-runner"
+  }
+}
+```
+
 ```console
 $ sqsjfr \
     -queue-url https://sqs.ap-northeast-1.amazonaws.com/123456789012/cron.fifo \

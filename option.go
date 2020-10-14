@@ -39,7 +39,7 @@ func (opt *Option) Validate() error {
 		`echo "hello world!"`,
 		opt.MessageTemplate,
 		time.Now(),
-		environments(map[string]string{}),
+		Environments(map[string]string{}),
 	)
 	if err != nil {
 		return err

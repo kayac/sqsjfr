@@ -11,22 +11,24 @@ import (
 	"github.com/kayac/go-config"
 )
 
-type environments map[string]string
+// Environments represents environment variables map defined in crontab.
+type Environments map[string]string
 
-func (e environments) String() string {
+func (e Environments) String() string {
 	b, _ := json.Marshal(e)
 	return string(b)
 }
 
-type message struct {
+// Message represents a message object sent to SQS.
+type Message struct {
 	Body      map[string]interface{} `json:"-"`
 	Command   string                 `json:"command"`
 	InvokedAt int64                  `json:"invoked_at"`
 	EntryID   int                    `json:"entry_id"`
-	Env       environments           `json:"envs"`
+	Env       Environments           `json:"envs"`
 }
 
-func (m message) String() string {
+func (m Message) String() string {
 	var b strings.Builder
 	if m.Body != nil {
 		json.NewEncoder(&b).Encode(m.Body)
@@ -36,16 +38,16 @@ func (m message) String() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func (m message) DeduplicationID() string {
+func (m Message) DeduplicationID() string {
 	h := sha256.New()
 	h.Write([]byte(m.String()))
 	h.Write([]byte(strconv.FormatInt(m.InvokedAt, 10)))
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func newMessage(command, messageTemplate string, now time.Time, envs environments) (*message, error) {
+func newMessage(command, messageTemplate string, now time.Time, envs Environments) (*Message, error) {
 	min := now.Truncate(time.Minute)
-	msg := message{
+	msg := Message{
 		Command:   command,
 		InvokedAt: min.Unix(),
 		Env:       envs,

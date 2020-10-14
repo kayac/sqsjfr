@@ -70,7 +70,7 @@ func TestNewMessageNoTemplate(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	var res sqsjfr.DefaultMessage
+	var res sqsjfr.Message
 	if err := json.Unmarshal([]byte(msg.String()), &res); err != nil {
 		t.Error(err)
 	}
