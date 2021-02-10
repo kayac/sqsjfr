@@ -250,12 +250,10 @@ func (app *App) send(msg *Message) error {
 }
 
 func (app *App) newJob(command string) cron.Job {
-	delay := time.Second + time.Duration(rand.Int63n(randomDelaySecond*1000))*time.Millisecond
-	log.Printf("[debug] new job command:%s delay:%s", command, delay)
+	log.Printf("[debug] new job command:%s", command)
 	return &Job{
 		Command: command,
 		app:     app,
-		delay:   delay,
 	}
 }
 
@@ -264,7 +262,10 @@ type Job struct {
 	ID      cron.EntryID
 	Command string
 	app     *App
-	delay   time.Duration
+}
+
+func (j *Job) delay() time.Duration {
+	return 100 * time.Millisecond * time.Duration(j.ID)
 }
 
 // Run runs a Job.
@@ -277,7 +278,7 @@ func (j *Job) Run() {
 		log.Printf("[warn] [entry:%d] %s", j.ID, err)
 		return
 	}
-	time.Sleep(j.delay)
+	time.Sleep(j.delay())
 	log.Printf("[info] [entry:%d] invoke job %s", j.ID, msg.String())
 	if err := j.app.send(msg); err != nil {
 		log.Printf("[error] [entry:%d] failed to send message: %s", j.ID, err)
