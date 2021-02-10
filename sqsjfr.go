@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
@@ -32,6 +33,25 @@ const randomDelaySecond = 5
 // SQSTimeout defines a timeout to send message.
 var SQSTimeout = 10 * time.Second
 
+type errorReload struct{}
+
+func (e errorReload) Error() string {
+	return "reloading required"
+}
+
+var errReload = errorReload{}
+
+type logger interface {
+	Println(...interface{})
+	Printf(string, ...interface{})
+}
+
+type nullLogger struct{}
+
+func (l nullLogger) Println(v ...interface{}) {}
+
+func (l nullLogger) Printf(format string, v ...interface{}) {}
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
@@ -43,7 +63,10 @@ type App struct {
 	envs   Environments
 	sqs    *sqs.SQS
 	ctx    context.Context
+	reload context.Context
+	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	digest []byte
 }
 
 // New creates an App instance.
@@ -57,21 +80,88 @@ func New(ctx context.Context, opt *Option) (*App, error) {
 		sqs:    sqs.New(sess),
 		ctx:    ctx,
 	}
-	if err := app.load(); err != nil {
-		return nil, err
-	}
 	return app, nil
 }
 
 // Run runs sqsjfr instance.
-func (app *App) Run() {
+func (app *App) Run() error {
+	for {
+		app.reload, app.cancel = context.WithCancel(app.ctx)
+		if err := app.run(); err == nil {
+			// normarly shutdown
+			log.Println("[info] goodby")
+			return nil
+		} else if _, ok := err.(errorReload); ok {
+			log.Println("[info] reloading")
+			continue
+		} else {
+			return err
+		}
+	}
+}
+
+func (app *App) watch() {
+	interval := app.option.CheckInterval
+	if interval == 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	log.Printf("[info] starting up watcher interval %s", interval)
+	for {
+		select {
+		case <-app.ctx.Done():
+			// canceled by others
+			return
+		case <-ticker.C:
+		}
+		newDigest, err := func() ([]byte, error) {
+			f, err := app.option.ReadCrontabFile()
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+			h := sha256.New()
+			r := io.TeeReader(f, h)
+			_, _, err = readCrontab(r, newDummyJob)
+			return h.Sum(nil), err
+		}()
+		if err != nil {
+			log.Println("[warn]", err)
+			continue
+		}
+		if !bytes.Equal(app.digest, newDigest) {
+			log.Printf("[info] crontab is modified %x -> %x", app.digest, newDigest)
+			app.cancel()
+			return
+		}
+		log.Printf("[debug] digest unchanged %x", app.digest)
+	}
+}
+
+func (app *App) run() error {
+	if err := app.load(); err != nil {
+		return err
+	}
+	if app.option.DryRun {
+		log.Println("[info] dry run OK")
+		return nil
+	}
+
+	go app.watch()
+
 	log.Println("[info] running daemon")
 	app.cron.Start()
-	<-app.ctx.Done()
+	var err error
+	select {
+	case <-app.ctx.Done():
+	case <-app.reload.Done():
+		err = errReload
+	}
 	app.cron.Stop()
 	log.Println("[info] shutting down")
 	app.wg.Wait() // wait all invoke functions
-	log.Println("[info] goodby")
+	return err
 }
 
 func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environments, error) {
@@ -105,16 +195,13 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environment
 		}
 		if j, ok := job.(*Job); ok {
 			j.ID = id
+			log.Printf("[info] [entry:%d] registered > %s", id, line)
 		}
-		log.Printf("[info] [entry:%d] registered > %s", id, line)
 	}
 
 	envs, err := envparse.Parse(envsBuf)
 	if err != nil {
 		return nil, nil, err
-	}
-	for name, value := range envs {
-		log.Printf("[info] defined > %s=%s", name, value)
 	}
 	return c, Environments(envs), nil
 }
@@ -127,13 +214,20 @@ func (app *App) load() error {
 	}
 	defer f.Close()
 
-	app.cron, app.envs, err = readCrontab(f, app.newJob)
+	h := sha256.New()
+	r := io.TeeReader(f, h)
+	app.cron, app.envs, err = readCrontab(r, app.newJob)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read crontab %s", app.option.CrontabURL)
 	}
+	app.digest = h.Sum(nil)
 
+	log.Printf("[debug] crontab digest %x", app.digest)
 	log.Printf("[info] %d entries registered", len(app.cron.Entries()))
 	log.Printf("[info] %d environment variables defined", len(app.envs))
+	for name, value := range app.envs {
+		log.Printf("[info] export %s=%s", name, value)
+	}
 	return nil
 }
 
@@ -189,3 +283,11 @@ func (j *Job) Run() {
 		log.Printf("[error] [entry:%d] failed to send message: %s", j.ID, err)
 	}
 }
+
+type dummyJob struct{}
+
+func newDummyJob(string) cron.Job {
+	return &dummyJob{}
+}
+
+func (j *dummyJob) Run() {}

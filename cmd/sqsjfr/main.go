@@ -37,12 +37,12 @@ func main() {
 func _main() error {
 	var opt sqsjfr.Option
 	var logLevel string
-	var dryRun bool
 
 	flag.StringVar(&opt.QueueURL, "queue-url", "", "SQS queue URL")
 	flag.StringVar(&opt.MessageTemplate, "message-template", "", "SQS message template(JSON)")
 	flag.StringVar(&logLevel, "log-level", "info", "log level")
-	flag.BoolVar(&dryRun, "dry-run", false, "dry run")
+	flag.DurationVar(&opt.CheckInterval, "check-interval", 0, "interval of checking for crontab modified")
+	flag.BoolVar(&opt.DryRun, "dry-run", false, "dry run")
 	flag.VisitAll(envToFlag)
 	flag.Parse()
 
@@ -73,10 +73,6 @@ func _main() error {
 	app, err := sqsjfr.New(ctx, &opt)
 	if err != nil {
 		return err
-	}
-	if dryRun {
-		log.Println("[info] dry run OK")
-		return nil
 	}
 	app.Run()
 	return nil

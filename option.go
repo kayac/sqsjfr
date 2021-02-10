@@ -22,6 +22,8 @@ type Option struct {
 	CrontabURL      string
 	QueueURL        string
 	MessageTemplate string
+	CheckInterval   time.Duration
+	DryRun          bool
 
 	sess *session.Session
 }
