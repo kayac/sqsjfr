@@ -80,7 +80,7 @@ func New(ctx context.Context, opt *Option) (*App, error) {
 		sqs:    sqs.New(sess),
 		ctx:    ctx,
 	}
-	return app, nil
+	return app, opt.Validate(sess)
 }
 
 // Run runs sqsjfr instance.
@@ -107,7 +107,7 @@ func (app *App) watch() {
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	log.Printf("[info] starting up watcher interval %s", interval)
+	log.Printf("[info] starting up crontab watcher interval %s", interval)
 	for {
 		select {
 		case <-app.ctx.Done():
