@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 	_ "time/tzdata"
 
 	"github.com/hashicorp/logutils"
@@ -41,7 +42,7 @@ func _main() error {
 	flag.StringVar(&opt.QueueURL, "queue-url", "", "SQS queue URL")
 	flag.StringVar(&opt.MessageTemplate, "message-template", "", "SQS message template(JSON)")
 	flag.StringVar(&logLevel, "log-level", "info", "log level")
-	flag.DurationVar(&opt.CheckInterval, "check-interval", 0, "interval of checking for crontab modified")
+	flag.DurationVar(&opt.CheckInterval, "check-interval", time.Minute, "interval of checking for crontab modified")
 	flag.BoolVar(&opt.DryRun, "dry-run", false, "dry run")
 	flag.IntVar(&opt.StatsPort, "stats-port", sqsjfr.DefaultStatsServerPort, "stats HTTP server port")
 	flag.VisitAll(envToFlag)

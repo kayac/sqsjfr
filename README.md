@@ -2,7 +2,7 @@
 
 SQS job feeder.
 
-sqsjfr reads a crontab file and send job messages by the crontab schedules to Amazon SQS FIFO queue.
+sqsjfr reads a crontab (from local file, http URL, or S3 URL) and send job messages by the crontab schedules to Amazon SQS FIFO queue.
 
 sqsjfr is designed to cooperate with [sqsjkr](https://github.com/kayac/sqsjkr), but runs as a standalone daemon to send messages to SQS.
 
@@ -21,15 +21,21 @@ $ brew install kayac/tap/sqsjfr
 ## Usage
 
 ```
+$ sqsjfr [options] (/path/to|http://...|s3://...)/crontab
+
 Usage of sqsjfr:
+  -check-interval duration
+        interval of checking for crontab modified (default 1m0s)
   -dry-run
-    	dry run
+        dry run
   -log-level string
-    	log level (default "info")
+        log level (default "info")
   -message-template string
-    	SQS message template(JSON)
+        SQS message template(JSON)
   -queue-url string
-    	SQS queue URL
+        SQS queue URL
+  -stats-port int
+        stats HTTP server port (default 8061)
 ```
 
 Environment variables `SQSJFR_*` are also specify that options. For example, `SQSJFR_QUEUE_URL=https://sqs.ap-northeast-1.amazonaws.com/123456789012/cron.fifo`
@@ -100,6 +106,24 @@ $ sqsjfr \
 Schedule specs are parsed by [github.com/robfig](https://github.com/robfig/cron).
   - Blank lines and leading spaces and tabs are ignored.
   - Lines whose first non-space character is a pound-sign (#) are comments, and are ignored.
+
+## Stats HTTP server
+
+sqsjfr runs a stats HTTP server on port `-stats-port`(defalt 8061).
+
+The endpoint returns metrics as JSON format.
+
+```json
+{
+  "entries": {
+    "registered": 2
+  },
+  "invocations": {
+    "succeeded": 12,
+    "failed": 0
+  }
+}
+```
 
 ## High Availability
 
