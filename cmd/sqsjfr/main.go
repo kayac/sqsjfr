@@ -43,6 +43,7 @@ func _main() error {
 	flag.StringVar(&logLevel, "log-level", "info", "log level")
 	flag.DurationVar(&opt.CheckInterval, "check-interval", 0, "interval of checking for crontab modified")
 	flag.BoolVar(&opt.DryRun, "dry-run", false, "dry run")
+	flag.IntVar(&opt.StatsPort, "stats-port", sqsjfr.DefaultStatsServerPort, "stats HTTP server port")
 	flag.VisitAll(envToFlag)
 	flag.Parse()
 

@@ -3,7 +3,6 @@ package sqsjfr
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -17,6 +16,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+const DefaultStatsServerPort = 8061
+
 // Option represents sqsjfr option
 type Option struct {
 	CrontabURL      string
@@ -24,19 +25,13 @@ type Option struct {
 	MessageTemplate string
 	CheckInterval   time.Duration
 	DryRun          bool
+	StatsPort       int
 
 	sess *session.Session
 }
 
 // Validate validates option values.
 func (opt *Option) Validate() error {
-	if src, err := opt.ReadCrontabFile(); err != nil {
-		return err
-	} else {
-		io.Copy(ioutil.Discard, src) // dispose at validate
-		src.Close()
-	}
-
 	region, accountID, queueName, err := parseQueueURL(opt.QueueURL)
 	log.Println("[debug] region:", region)
 	log.Println("[debug] accountID:", accountID)
@@ -83,9 +78,9 @@ func parseQueueURL(s string) (region string, accountID string, queueName string,
 	return
 }
 
-func (opt *Option) ReadCrontabFile() (io.ReadCloser, error) {
-	log.Println("[debug] crontab URL:", opt.CrontabURL)
-	u, err := url.Parse(opt.CrontabURL)
+func (app *App) ReadCrontabFile() (io.ReadCloser, error) {
+	log.Println("[debug] crontab URL:", app.option.CrontabURL)
+	u, err := url.Parse(app.option.CrontabURL)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +89,7 @@ func (opt *Option) ReadCrontabFile() (io.ReadCloser, error) {
 	switch u.Scheme {
 	case "s3":
 		key := strings.TrimPrefix(u.Path, "/")
-		src, err = opt.readS3(u.Host, key)
+		src, err = readS3(app.sess, u.Host, key)
 	case "http", "https":
 		src, err = readHTTP(u.String())
 	case "file", "":
@@ -108,8 +103,8 @@ func (opt *Option) ReadCrontabFile() (io.ReadCloser, error) {
 	return src, nil
 }
 
-func (opt *Option) readS3(bucket, key string) (io.ReadCloser, error) {
-	svc := s3.New(opt.sess)
+func readS3(sess *session.Session, bucket, key string) (io.ReadCloser, error) {
+	svc := s3.New(sess)
 	log.Printf("[debug] reading S3 bucket:%s key:%s", bucket, key)
 	result, err := svc.GetObject(&s3.GetObjectInput{
 		Bucket: aws.String(bucket),

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -62,11 +63,15 @@ type App struct {
 	cron   *cron.Cron
 	envs   Environments
 	sqs    *sqs.SQS
+	sess   *session.Session
+
 	ctx    context.Context
 	reload context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	digest []byte
+
+	stats *Stats
 }
 
 // New creates an App instance.
@@ -78,15 +83,22 @@ func New(ctx context.Context, opt *Option) (*App, error) {
 	app := &App{
 		option: opt,
 		sqs:    sqs.New(sess),
+		sess:   sess,
 		ctx:    ctx,
+		stats:  &Stats{},
 	}
-	return app, opt.Validate(sess)
+	return app, opt.Validate()
 }
 
 // Run runs sqsjfr instance.
 func (app *App) Run() error {
+	go func() {
+		if err := app.runStatsServer(); err != nil {
+			panic(err)
+		}
+	}()
 	for {
-		app.reload, app.cancel = context.WithCancel(app.ctx)
+		app.reload, app.cancel = context.WithCancel(context.Background())
 		if err := app.run(); err == nil {
 			// normarly shutdown
 			log.Println("[info] goodby")
@@ -116,7 +128,7 @@ func (app *App) watch() {
 		case <-ticker.C:
 		}
 		newDigest, err := func() ([]byte, error) {
-			f, err := app.option.ReadCrontabFile()
+			f, err := app.ReadCrontabFile()
 			if err != nil {
 				return nil, err
 			}
@@ -208,7 +220,7 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environment
 
 func (app *App) load() error {
 	log.Println("[info] loading crontab", app.option.CrontabURL)
-	f, err := app.option.ReadCrontabFile()
+	f, err := app.ReadCrontabFile()
 	if err != nil {
 		return err
 	}
@@ -225,6 +237,7 @@ func (app *App) load() error {
 	log.Printf("[debug] crontab digest %x", app.digest)
 	log.Printf("[info] %d entries registered", len(app.cron.Entries()))
 	log.Printf("[info] %d environment variables defined", len(app.envs))
+	atomic.StoreInt64(&app.stats.Entries.Registered, int64(len(app.cron.Entries())))
 	for name, value := range app.envs {
 		log.Printf("[info] export %s=%s", name, value)
 	}
@@ -281,7 +294,10 @@ func (j *Job) Run() {
 	time.Sleep(j.delay())
 	log.Printf("[info] [entry:%d] invoke job %s", j.ID, msg.String())
 	if err := j.app.send(msg); err != nil {
+		atomic.AddInt64(&j.app.stats.Invocations.Failed, 1)
 		log.Printf("[error] [entry:%d] failed to send message: %s", j.ID, err)
+	} else {
+		atomic.AddInt64(&j.app.stats.Invocations.Succeeded, 1)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -29,8 +30,7 @@ func newJob(command string) cron.Job {
 func TestReadCrontab(t *testing.T) {
 	testResults = testResults[0:0]
 
-	opt := sqsjfr.Option{CrontabURL: "tests/crontab"}
-	f, err := opt.ReadCrontabFile()
+	f, err := os.Open("tests/crontab")
 	if err != nil {
 		t.Error(err)
 	}
@@ -65,8 +65,7 @@ func TestReadCrontab(t *testing.T) {
 func TestReadCrontabFail(t *testing.T) {
 	testResults = testResults[0:0]
 
-	opt := sqsjfr.Option{CrontabURL: "tests/crontab.bad"}
-	f, err := opt.ReadCrontabFile()
+	f, err := os.Open("tests/crontab.bad")
 	if err != nil {
 		t.Error(err)
 	}
@@ -83,8 +82,7 @@ func TestReadCrontabFail(t *testing.T) {
 func TestReadCrontabFailEnv(t *testing.T) {
 	testResults = testResults[0:0]
 
-	opt := sqsjfr.Option{CrontabURL: "tests/crontab.badenv"}
-	f, err := opt.ReadCrontabFile()
+	f, err := os.Open("tests/crontab.badenv")
 	if err != nil {
 		t.Error(err)
 	}
@@ -112,8 +110,7 @@ func TestReadCrontabHTTP(t *testing.T) {
 	defer ts.Close()
 	t.Logf("testing URL %s", ts.URL)
 
-	opt := sqsjfr.Option{CrontabURL: ts.URL + "/tests/crontab"}
-	f, err := opt.ReadCrontabFile()
+	f, err := sqsjfr.ReadHTTP(ts.URL + "/tests/crontab")
 	if err != nil {
 		t.Error(err)
 	}
