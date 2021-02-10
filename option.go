@@ -2,26 +2,37 @@ package sqsjfr
 
 import (
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/pkg/errors"
 )
 
 // Option represents sqsjfr option
 type Option struct {
-	Path            string
+	CrontabURL      string
 	QueueURL        string
 	MessageTemplate string
+
+	sess *session.Session
 }
 
 // Validate validates option values.
 func (opt *Option) Validate() error {
-	if _, err := os.Stat(opt.Path); err != nil {
-		return errors.Wrapf(err, "%s is not found", opt.Path)
+	if src, err := opt.ReadCrontabFile(); err != nil {
+		return err
+	} else {
+		io.Copy(ioutil.Discard, src) // dispose at validate
+		src.Close()
 	}
 
 	region, accountID, queueName, err := parseQueueURL(opt.QueueURL)
@@ -68,4 +79,50 @@ func parseQueueURL(s string) (region string, accountID string, queueName string,
 	}
 	accountID, queueName = p[1], p[2]
 	return
+}
+
+func (opt *Option) ReadCrontabFile() (io.ReadCloser, error) {
+	log.Println("[debug] crontab URL:", opt.CrontabURL)
+	u, err := url.Parse(opt.CrontabURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var src io.ReadCloser
+	switch u.Scheme {
+	case "s3":
+		key := strings.TrimPrefix(u.Path, "/")
+		src, err = opt.readS3(u.Host, key)
+	case "http", "https":
+		src, err = readHTTP(u.String())
+	case "file", "":
+		src, err = os.Open(u.Path)
+	default:
+		err = errors.Errorf("URL scheme %s is not supported", u.Scheme)
+	}
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read from %s", u.String())
+	}
+	return src, nil
+}
+
+func (opt *Option) readS3(bucket, key string) (io.ReadCloser, error) {
+	svc := s3.New(opt.sess)
+	log.Printf("[debug] reading S3 bucket:%s key:%s", bucket, key)
+	result, err := svc.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Body, nil
+}
+
+func readHTTP(u string) (io.ReadCloser, error) {
+	resp, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
 }

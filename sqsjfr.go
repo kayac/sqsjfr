@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"math/rand"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -121,15 +120,16 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environment
 }
 
 func (app *App) load() error {
-	log.Println("[info] loading crontab", app.option.Path)
-	f, err := os.Open(app.option.Path)
+	log.Println("[info] loading crontab", app.option.CrontabURL)
+	f, err := app.option.ReadCrontabFile()
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
 	app.cron, app.envs, err = readCrontab(f, app.newJob)
 	if err != nil {
-		return errors.Wrapf(err, "failed to read crontab %s", app.option.Path)
+		return errors.Wrapf(err, "failed to read crontab %s", app.option.CrontabURL)
 	}
 
 	log.Printf("[info] %d entries registered", len(app.cron.Entries()))

@@ -57,11 +57,8 @@ func _main() error {
 	if len(args) != 1 {
 		return errors.New("crontab is required")
 	}
-	opt.Path = args[0]
+	opt.CrontabURL = args[0]
 	log.Printf("[debug] option:%#v", opt)
-	if err := opt.Validate(); err != nil {
-		return err
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

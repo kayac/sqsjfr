@@ -26,7 +26,8 @@ func newJob(command string) cron.Job {
 }
 
 func TestReadCrontab(t *testing.T) {
-	f, err := os.Open("tests/crontab")
+	opt := sqsjfr.Option{CrontabURL: "tests/crontab"}
+	f, err := opt.ReadCrontabFile()
 	if err != nil {
 		t.Error(err)
 	}
