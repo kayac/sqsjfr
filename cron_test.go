@@ -1,6 +1,7 @@
 package sqsjfr_test
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -34,12 +35,15 @@ func TestReadCrontab(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	c, envs, err := sqsjfr.ReadCrontab(f, newJob)
+	c, envs, digest, err := sqsjfr.ReadCrontab(f, newJob)
 	if err != nil {
 		t.Error(err)
 	}
 	if len(c.Entries()) != 2 {
 		t.Errorf("unexpected loaded entries len %d", len(c.Entries()))
+	}
+	if d := fmt.Sprintf("%x", digest); d != "b4556de411dc8f9c5ee925a335a75183d8699a3d8a5a1140b05f68defa233a6d" {
+		t.Errorf("unexpected digest %s", d)
 	}
 	for _, entry := range c.Entries() {
 		entry.Job.Run()
@@ -69,7 +73,7 @@ func TestReadCrontabFail(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	c, _, err := sqsjfr.ReadCrontab(f, newJob)
+	c, _, _, err := sqsjfr.ReadCrontab(f, newJob)
 	t.Log(err)
 	if err == nil {
 		t.Error("must be failed")
@@ -86,7 +90,7 @@ func TestReadCrontabFailEnv(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	c, envs, err := sqsjfr.ReadCrontab(f, newJob)
+	c, envs, _, err := sqsjfr.ReadCrontab(f, newJob)
 	t.Log(err)
 	if err == nil {
 		t.Error("must be failed")
@@ -114,9 +118,12 @@ func TestReadCrontabHTTP(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	c, envs, err := sqsjfr.ReadCrontab(f, newJob)
+	c, envs, digest, err := sqsjfr.ReadCrontab(f, newJob)
 	if err != nil {
 		t.Error(err)
+	}
+	if d := fmt.Sprintf("%x", digest); d != "b4556de411dc8f9c5ee925a335a75183d8699a3d8a5a1140b05f68defa233a6d" {
+		t.Errorf("unexpected digest %s", d)
 	}
 	if len(c.Entries()) != 2 {
 		t.Errorf("unexpected loaded entries len %d", len(c.Entries()))

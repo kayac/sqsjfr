@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,8 +28,6 @@ var (
 	reLooksLikeEnv = regexp.MustCompile("^[A-Za-z_][A-Za-z0-9_]*=")
 )
 
-const randomDelaySecond = 5
-
 // SQSTimeout defines a timeout to send message.
 var SQSTimeout = 10 * time.Second
 
@@ -41,21 +38,6 @@ func (e errorReload) Error() string {
 }
 
 var errReload = errorReload{}
-
-type logger interface {
-	Println(...interface{})
-	Printf(string, ...interface{})
-}
-
-type nullLogger struct{}
-
-func (l nullLogger) Println(v ...interface{}) {}
-
-func (l nullLogger) Printf(format string, v ...interface{}) {}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 // App represents a sqsjfr application instance.
 type App struct {
@@ -133,10 +115,8 @@ func (app *App) watch() {
 				return nil, err
 			}
 			defer f.Close()
-			h := sha256.New()
-			r := io.TeeReader(f, h)
-			_, _, err = readCrontab(r, newDummyJob)
-			return h.Sum(nil), err
+			_, _, digest, err := readCrontab(f, newDummyJob)
+			return digest, err
 		}()
 		if err != nil {
 			log.Println("[warn]", err)
@@ -176,8 +156,10 @@ func (app *App) run() error {
 	return err
 }
 
-func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environments, error) {
+func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environments, []byte, error) {
 	c := cron.New()
+	h := sha256.New()
+	r = io.TeeReader(r, h)
 	scanner := bufio.NewScanner(r)
 	lines := 0
 	envsBuf := bytes.NewBuffer([]byte{})
@@ -196,14 +178,14 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environment
 		envsBuf.WriteString("\n")
 		f := reSpace.Split(line, 6)
 		if len(f) < 6 {
-			return nil, nil, fmt.Errorf("line %d, too few feilds > %s", lines, line)
+			return nil, nil, nil, fmt.Errorf("line %d, too few feilds > %s", lines, line)
 		}
 		spec := strings.Join(f[0:5], " ")
 		command := f[5]
 		job := fn(command)
 		id, err := c.AddJob(spec, job)
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "line %d, failed to add > %s", lines, line)
+			return nil, nil, nil, errors.Wrapf(err, "line %d, failed to add > %s", lines, line)
 		}
 		if j, ok := job.(*Job); ok {
 			j.ID = id
@@ -213,9 +195,9 @@ func readCrontab(r io.Reader, fn func(string) cron.Job) (*cron.Cron, Environment
 
 	envs, err := envparse.Parse(envsBuf)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return c, Environments(envs), nil
+	return c, Environments(envs), h.Sum(nil), nil
 }
 
 func (app *App) load() error {
@@ -226,18 +208,16 @@ func (app *App) load() error {
 	}
 	defer f.Close()
 
-	h := sha256.New()
-	r := io.TeeReader(f, h)
-	app.cron, app.envs, err = readCrontab(r, app.newJob)
+	app.cron, app.envs, app.digest, err = readCrontab(f, app.newJob)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read crontab %s", app.option.CrontabURL)
 	}
-	app.digest = h.Sum(nil)
 
 	log.Printf("[debug] crontab digest %x", app.digest)
 	log.Printf("[info] %d entries registered", len(app.cron.Entries()))
-	log.Printf("[info] %d environment variables defined", len(app.envs))
 	atomic.StoreInt64(&app.stats.Entries.Registered, int64(len(app.cron.Entries())))
+
+	log.Printf("[info] %d environment variables defined", len(app.envs))
 	for name, value := range app.envs {
 		log.Printf("[info] export %s=%s", name, value)
 	}
@@ -256,17 +236,25 @@ func (app *App) send(msg *Message) error {
 	log.Println("[debug] sending message:", in.String())
 	out, err := app.sqs.SendMessageWithContext(ctx, in)
 	if err != nil {
+		atomic.AddInt64(&app.stats.Invocations.Failed, 1)
 		return err
 	}
+	atomic.AddInt64(&app.stats.Invocations.Succeeded, 1)
 	log.Println("[debug] sent messageID:", *out.MessageId)
 	return nil
+}
+
+func (app *App) newMessage(command string) (*Message, error) {
+	return newMessage(command, app.option.MessageTemplate, time.Now(), app.envs)
 }
 
 func (app *App) newJob(command string) cron.Job {
 	log.Printf("[debug] new job command:%s", command)
 	return &Job{
-		Command: command,
-		app:     app,
+		Command:   command,
+		wg:        &app.wg,
+		generator: app.newMessage,
+		sender:    app.send,
 	}
 }
 
@@ -274,7 +262,10 @@ func (app *App) newJob(command string) cron.Job {
 type Job struct {
 	ID      cron.EntryID
 	Command string
-	app     *App
+
+	wg        *sync.WaitGroup
+	generator func(string) (*Message, error)
+	sender    func(*Message) error
 }
 
 func (j *Job) delay() time.Duration {
@@ -283,21 +274,18 @@ func (j *Job) delay() time.Duration {
 
 // Run runs a Job.
 func (j *Job) Run() {
-	j.app.wg.Add(1)
-	defer j.app.wg.Done()
+	j.wg.Add(1)
+	defer j.wg.Done()
 
-	msg, err := newMessage(j.Command, j.app.option.MessageTemplate, time.Now(), j.app.envs)
+	msg, err := j.generator(j.Command)
 	if err != nil {
 		log.Printf("[warn] [entry:%d] %s", j.ID, err)
 		return
 	}
 	time.Sleep(j.delay())
 	log.Printf("[info] [entry:%d] invoke job %s", j.ID, msg.String())
-	if err := j.app.send(msg); err != nil {
-		atomic.AddInt64(&j.app.stats.Invocations.Failed, 1)
+	if err := j.sender(msg); err != nil {
 		log.Printf("[error] [entry:%d] failed to send message: %s", j.ID, err)
-	} else {
-		atomic.AddInt64(&j.app.stats.Invocations.Succeeded, 1)
 	}
 }
 
